@@ -73,7 +73,7 @@ const median = latencies[Math.floor(latencies.length / 2)] ?? 0;
 const table = rows.map((r) => {
   const f = r.full;
   const full = f ? `${mark(f.cause === r.c.cause)} ${f.cause} · ${mark(f.action === r.c.action)} ${f.action} · ${Math.round(f.confidence * 100)}% · ${f.source}` : `error: ${r.error}`;
-  return `| ${r.c.id} | ${r.c.note} | ${r.c.cause} · ${r.c.action} | ${mark(r.rules.action === r.c.action)} ${r.rules.cause} · ${r.rules.action} | ${full} |`;
+  return `| ${r.c.id} | ${r.c.note} | ${r.c.cause} · ${r.c.action} | ${mark(r.rules.cause === r.c.cause)} ${r.rules.cause} · ${mark(r.rules.action === r.c.action)} ${r.rules.action} | ${full} |`;
 });
 
 const report = `# Triage evaluation

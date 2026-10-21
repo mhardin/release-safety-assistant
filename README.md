@@ -22,9 +22,9 @@ Workers AI (Llama 3.3 70B), in TypeScript.
 ## Try it (2 minutes)
 
 1. Open the live URL. Type a service name (e.g. `my-demo`) and press **Switch**.
-2. Click **Registry timeout**, then **Triage** → environment, ~94%, recommends retry.
-   Click **Retry the job**. Do this twice more: on the third triage the card
-   says **Known flaky · retry fixed it 2 of 2 times** and confidence goes up.
+2. Click **Registry timeout**, then **Triage** → environment, ~90%, recommends retry.
+   Click **Retry the job**, then triage and retry it once more. The third
+   triage says **Known flaky · retry fixed it 2 of 2 times**, at higher confidence.
 3. Click **Failing test** → change-caused, recommends **fix forward**: it failed
    pre-merge, so there's nothing to roll back.
 4. Click **Crash-looping deploy** → change-caused in a deploy, recommends **roll back**.
@@ -79,14 +79,19 @@ sequenceDiagram
   A-->>Dev: Approve / Reject buttons (state sync)
   Dev->>A: decideGate(promote-25, approve)
   A->>W: event gate-promote-25 {approved}
-  W->>W: 25% · bake · health check (fails → auto-rollback)
-  W-->>A: complete(outcome)
+  W->>W: 25% · bake · health check
+  Note over W: a failed check rolls back here, without asking
+  W-->>A: progress: gate promote-100 waiting
+  Dev->>A: decideGate(promote-100, approve)
+  A->>W: event gate-promote-100 {approved}
+  W->>W: 100% · bake · health check
+  W-->>A: complete(succeeded)
   A->>A: write outcome to incident history
 ```
 
 ### How triage decides
 
-1. **Rules** (`src/triage/rules.ts`): about 16 regexes for known failure
+1. **Rules** (`src/triage/rules.ts`): 16 regexes for known failure
    patterns, each weighted toward *environment* (ETIMEDOUT, DNS, registry
    5xx, rate limits, lost runners, full disks) or *change* (compile errors,
    assertions, exceptions, Go panics, failed migrations). They also detect
@@ -96,19 +101,21 @@ sequenceDiagram
    with the same signature in the last 30 days, and whether retrying fixed them.
 3. **Model** (`src/triage/llm.ts`): Llama 3.3 gets the log (head + tail,
    instruction lines removed), the rule hits, and the history, and must answer
-   in a JSON schema. The output is validated; anything malformed counts as no answer.
+   in a JSON schema. The output is validated; anything malformed counts as no
+   answer, and evidence lines that aren't in the log are dropped.
 4. **Merge** (`src/triage/combine.ts`, then `applyHistory`): pure functions.
    Rules and model agreeing raises confidence; disagreeing lowers it and says
    so. The model alone is capped at 75% (50% if the log contained
    instructions to the AI), and a model that may have been steered can't
    override the rules. Known-flaky history raises confidence in environment;
-   history never overrides evidence against the change.
+   if retrying failed to fix the same failure before, retry is no longer
+   recommended. History never overrides evidence against the change.
 5. **Action:** environment/unknown → retry; change in a deploy → roll back;
    change in pre-merge CI → fix forward; a change description → staged rollout.
 
 ## Run locally
 
-Requires Node 22+ and a free Cloudflare account. Workers AI runs on
+Requires Node 22.12+ and a free Cloudflare account. Workers AI runs on
 Cloudflare even during local dev, so log in once:
 
 ```bash
@@ -132,6 +139,9 @@ the repo; Wrangler uses your `wrangler login` session.
 
 CI (GitHub Actions) runs typecheck, all tests, and the build on every push
 and PR. No Cloudflare credentials are needed: the AI binding is faked in tests.
+A few tests deliberately force Workflow timeouts or look up missing instances,
+so `npm test` prints some "uncaught exception" lines from the local Workflows
+engine; the tests themselves pass, and comments mark where that happens.
 
 | Suite | Runs in | Covers |
 |---|---|---|
@@ -152,7 +162,8 @@ against the live deployment ([eval/results.md](eval/results.md)):
 The model's contribution shows in the pytest `KeyError` case (no rule
 matches; rules alone say unknown → retry, the model correctly says change →
 fix forward). The one cause miss is the Playwright timeout I labeled
-ambiguous, where the model leans environment (capped at 70%). Treat these
+ambiguous, where the model leans environment at 70% (model-only answers are
+capped at 75%). Treat these
 numbers with care: 18 cases written by the same person as the rules measure
 consistency, not real-world accuracy.
 
@@ -174,7 +185,7 @@ Short ADRs in [`docs/adr/`](docs/adr/):
   tunable, but not calibrated against real outcomes yet.
 - **Per-service Durable Objects** give isolation and simple consistency;
   cross-service questions need another store.
-- **Workflows over Durable Object alarms** gives restart-safety and readable
+- **Workflows over Durable Object alarms** give restart-safety and readable
   code at the cost of a second component and replay semantics to understand.
 - **Testing with a fake classifier** keeps CI fast, free, and deterministic;
   model behavior is covered by the separate eval instead.
@@ -184,8 +195,8 @@ Short ADRs in [`docs/adr/`](docs/adr/):
 - **Deploys and metrics are simulated.** `apply:*` steps and
   `simulateMetrics` stand in for a deploy API and a metrics query.
 - **No authentication.** Anyone with the URL can use it, read a service's
-  history by guessing its name, and use the account's Workers AI quota (the
-  free tier stops at its daily limit rather than billing). A real deployment
+  history by guessing its name, and use the account's Workers AI quota (on
+  the Workers Free plan, usage stops at the daily limit rather than billing). A real deployment
   would sit behind Cloudflare Access.
 - **Injection detection is pattern-based** and can be reworded around; the
   real protection is that the model can't override the rules when it's flagged.
@@ -193,6 +204,8 @@ Short ADRs in [`docs/adr/`](docs/adr/):
 - **Cold start:** the first connection after a deploy once took over 15s.
 - **Progress can repeat:** Workflow code outside steps re-runs on resume, so
   the UI can briefly show an older step status.
+- **One triage and one rollout per service at a time**; a second request gets
+  a clear error rather than queueing.
 - Chat history keeps 50 messages per service; pasted logs are stored as
   their first 1k and last 4k characters.
 
