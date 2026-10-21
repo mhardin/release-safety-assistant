@@ -1,4 +1,5 @@
 import { Agent, callable } from "agents";
+import { clip } from "../shared/text";
 import type { AgentState, ChatMessage, LlmVerdict, RuleResult, Verdict } from "../shared/types";
 import { combineVerdict } from "../triage/combine";
 import { classifyWithLlm } from "../triage/llm";
@@ -52,6 +53,12 @@ export class ReleaseAgent extends Agent<Env, AgentState> {
       outcome TEXT
     )`;
     if (!this.state.service) this.setState({ ...this.state, service: this.name });
+
+    // A Durable Object can be restarted mid-triage (deploy, eviction, crash).
+    // `busy` is persisted, so without this the UI would stay locked forever.
+    if (this.state.busy) {
+      this.addMessage({ role: "assistant", text: "The previous triage was interrupted before it finished. Please submit it again." }, false);
+    }
   }
 
   /** Triage a pasted log or change description. Called from the browser over RPC. */
@@ -60,7 +67,8 @@ export class ReleaseAgent extends Agent<Env, AgentState> {
     const text = input.trim();
     if (!text) throw new Error("Paste a log or describe a change.");
 
-    this.addMessage({ role: "user", text: text.slice(0, 20_000) }, true);
+    // Chat state is broadcast in full on every change, so keep stored logs small.
+    this.addMessage({ role: "user", text: clip(text, 1_000, 4_000) }, true);
     try {
       const rules = extractSignals(text);
       const llm = await this.classify(text, rules);

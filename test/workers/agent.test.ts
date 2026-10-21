@@ -1,6 +1,6 @@
 import { getAgentByName } from "agents";
 import { runInDurableObject } from "cloudflare:test";
-import { env } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 import type { ReleaseAgent } from "../../src/server/agent";
 import { SAMPLES } from "../../src/shared/samples";
@@ -97,6 +97,26 @@ describe("ReleaseAgent.triage", () => {
     expect(fake).not.toHaveBeenCalled();
   });
 
+  it("stores only the head and tail of a huge log in chat state", async () => {
+    const stub = await agentFor(async () => null);
+    await stub.triage("noise line\n".repeat(50_000) + SAMPLES.environmentFailure);
+    const state = await runInDurableObject(stub, (agent: ReleaseAgent) => agent.state);
+    expect(state.messages[0].text.length).toBeLessThan(6_000);
+    expect(state.messages[0].text).toContain("exit code 1");
+  });
+
+  it("clears a busy flag left behind by a restart mid-triage", async () => {
+    const stub = await agentFor();
+    const state = await runInDurableObject(stub, async (agent: ReleaseAgent) => {
+      // Simulate state persisted by a triage that never finished.
+      agent.setState({ ...agent.state, busy: true });
+      await agent.onStart();
+      return agent.state;
+    });
+    expect(state.busy).toBe(false);
+    expect(state.messages.at(-1)?.text).toMatch(/interrupted/);
+  });
+
   it("keeps history separate per service", async () => {
     const a = await agentFor(async () => null);
     const b = await agentFor(async () => null);
@@ -105,5 +125,22 @@ describe("ReleaseAgent.triage", () => {
     await b.triage(SAMPLES.mixedFailure);
     expect(await a.history()).toHaveLength(2);
     expect(await b.history()).toHaveLength(1);
+  });
+});
+
+describe("Worker routing", () => {
+  it.each(["Checkout%20API", "a%2Fb", "-x", ""])("rejects invalid service name %j", async (name) => {
+    const res = await exports.default.fetch(`http://localhost/agents/release-agent/${name}`);
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects unknown agent paths", async () => {
+    const res = await exports.default.fetch("http://localhost/agents/admin");
+    expect(res.status).toBe(400);
+  });
+
+  it("routes a valid service name to the agent", async () => {
+    const res = await exports.default.fetch("http://localhost/agents/release-agent/checkout-api");
+    expect(res.status).not.toBe(400);
   });
 });

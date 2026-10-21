@@ -2,6 +2,7 @@ import { useAgent } from "agents/react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import type { ReleaseAgent } from "../server/agent";
 import { SAMPLES } from "../shared/samples";
+import { normalizeServiceName } from "../shared/service";
 import type { AgentState, ChatMessage, Verdict } from "../shared/types";
 
 const SAMPLE_LABELS: Record<keyof typeof SAMPLES, string> = {
@@ -23,7 +24,9 @@ export function App() {
           className="service"
           onSubmit={(e) => {
             e.preventDefault();
-            if (draftService.trim()) setService(draftService.trim().toLowerCase());
+            const name = normalizeServiceName(draftService);
+            setDraftService(name || service);
+            if (name) setService(name);
           }}
         >
           <label htmlFor="service">Service</label>
