@@ -35,7 +35,7 @@ Workers AI (Llama 3.3 70B), in TypeScript.
 ## Architecture
 
 ```mermaid
-flowchart LR
+flowchart TB
   UI["React chat UI<br/>(Workers static assets)"]
 
   subgraph Worker["Cloudflare Worker"]
