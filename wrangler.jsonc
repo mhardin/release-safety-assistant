@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "release-safety-assistant",
+  "main": "src/server/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // Workers AI always runs on Cloudflare's GPUs, even during `vite dev`,
+  // so local development needs `npx wrangler login` once.
+  "ai": { "binding": "AI", "remote": true },
+
+  // The React UI is built by Vite and served as static assets by this Worker.
+  // Agent WebSocket/RPC traffic under /agents/* goes to the Worker code first.
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/agents/*"]
+  },
+
+  // One ReleaseAgent Durable Object instance per service name.
+  "durable_objects": {
+    "bindings": [{ "name": "ReleaseAgent", "class_name": "ReleaseAgent" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ReleaseAgent"] }]
+}

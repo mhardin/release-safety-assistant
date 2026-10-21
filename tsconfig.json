@@ -1,0 +1,4 @@
+{
+  "extends": "agents/tsconfig",
+  "include": ["src", "test", "worker-configuration.d.ts", "*.config.ts"]
+}
