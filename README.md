@@ -21,6 +21,23 @@ npm run dev        # http://localhost:5173
 npm test           # unit tests for the triage logic
 ```
 
+## Testing
+
+`npm test` runs two Vitest projects. CI (GitHub Actions) runs typecheck,
+both test projects, and the build on every push and PR.
+
+| Project | Runs in | Covers |
+|---|---|---|
+| `unit` (`test/unit/`) | Node | Rules, failure signatures, the rules + LLM merge policy, LLM output validation |
+| `workers` (`test/workers/`) | workerd, via `@cloudflare/vitest-plugin` | `ReleaseAgent` as a real Durable Object: SQLite persistence, chat state, error paths, per-service isolation |
+
+**How the LLM is handled in tests:** there is no AI binding in tests, so CI
+needs no Cloudflare credentials and results are deterministic. Each test
+swaps `ReleaseAgent.classify` for a fake, and one test leaves the real
+`classifyWithLlm` in place to check that a failing AI call falls back to the
+rules verdict. Whether Llama actually follows the JSON schema is not covered
+by these tests; that needs an evaluation set run against the real model.
+
 ## Layout
 
 | Path | What it is |
