@@ -57,8 +57,13 @@ export function buildMessages(input: string, rules: RuleResult, history: KnownPa
     : "- none matched";
   return [
     { role: "system", content: SYSTEM_PROMPT },
-    { role: "user", content: `Pattern-matching hints:\n${hints}\n\nService history: ${describeForPrompt(history)}\n\nInput:\n"""\n${truncate(redactInstructions(input))}\n"""` },
+    { role: "user", content: `Pattern-matching hints:\n${hints}\n\nService history: ${describeForPrompt(history)}\n\nInput:\n"""\n${fenced(input)}\n"""` },
   ];
+}
+
+/** Redact and shorten the input, and stop it from closing the prompt's """ delimiters early. */
+function fenced(input: string): string {
+  return truncate(redactInstructions(input)).replaceAll('"""', "'''");
 }
 
 export function truncate(input: string): string {
@@ -101,25 +106,29 @@ export async function classifyWithLlm(
   input: string,
   rules: RuleResult,
   history: KnownPattern | null = null,
+  timeoutMs = LLM_TIMEOUT_MS,
 ): Promise<LlmVerdict | null> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const call = ai.run(MODEL, {
-      messages: buildMessages(input, rules, history),
-      response_format: { type: "json_schema", json_schema: VERDICT_SCHEMA },
-      max_tokens: 600,
-      temperature: 0.1,
-    });
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`timed out after ${LLM_TIMEOUT_MS}ms`)), LLM_TIMEOUT_MS);
-    });
-    const result = await Promise.race([call, timeout]);
-    return parseLlmVerdict((result as { response?: unknown }).response);
+    const result = await ai.run(
+      MODEL,
+      {
+        messages: buildMessages(input, rules, history),
+        response_format: { type: "json_schema", json_schema: VERDICT_SCHEMA },
+        max_tokens: 600,
+        temperature: 0.1,
+      },
+      { signal: AbortSignal.timeout(timeoutMs) }, // cancels the request, not just the wait
+    );
+    const verdict = parseLlmVerdict((result as { response?: unknown }).response);
+    return verdict && keepQuotedEvidence(verdict, input);
   } catch (err) {
-    // JSON mode can fail with "JSON Mode couldn't be met"; network calls can fail or hang too.
+    // JSON mode can fail with "JSON Mode couldn't be met"; network calls can fail or time out too.
     console.error("LLM classification failed", err);
     return null;
-  } finally {
-    clearTimeout(timer);
   }
+}
+
+/** The UI presents evidence as quoted log lines, so drop any the model didn't actually quote. */
+export function keepQuotedEvidence(verdict: LlmVerdict, input: string): LlmVerdict {
+  return { ...verdict, evidence: verdict.evidence.filter((e) => e.trim() !== "" && input.includes(e.trim())) };
 }

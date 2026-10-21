@@ -57,7 +57,7 @@ function Chat({ service }: { service: string }) {
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+  }, [messages.at(-1)?.id]); // not length: it stops changing once the 50-message cap is reached
 
   // Wrap an agent call so its error shows under the composer.
   async function run(call: () => Promise<unknown>) {

@@ -6,7 +6,8 @@ import { combineVerdict } from "../../src/triage/combine";
 import { buildMessages } from "../../src/triage/llm";
 import { extractSignals, redactInstructions } from "../../src/triage/rules";
 
-// Regression tests for problems found by testing the live app against the real model.
+// Regression tests for problems found by testing the live app: prompt
+// injection, misread input kinds, unsafe service names, oversized logs.
 
 const llm = (over: Partial<LlmVerdict>): LlmVerdict => ({
   kind: "failure_log",
@@ -55,11 +56,6 @@ describe("prompt injection in pasted logs", () => {
     const v = combineVerdict(rules, llm({}));
     expect(v.confidence).toBe(0.5);
   });
-
-  it("recognizes Go panics as change-caused", () => {
-    const r = extractSignals("panic: runtime error: index out of range [3] with length 3\ngoroutine 7 [running]:");
-    expect(r.signals.map((s) => s.rule)).toEqual(["runtime-exception"]);
-  });
 });
 
 describe("input kind", () => {
@@ -71,8 +67,15 @@ describe("input kind", () => {
     expect(v.action).toBe("retry");
   });
 
-  it("does not mistake a change that mentions errors for a failure", () => {
-    expect(extractSignals("Improve error handling in the payment client and add retries").kind).toBe("change_description");
+  it("does not mistake a change that mentions errors or failures for a failure", () => {
+    for (const description of [
+      "Improve error handling in the payment client and add retries",
+      "Fix crash in cart totals when discount is null",
+      "Fix the failing checkout test",
+      "Retry failed payments with exponential backoff",
+    ]) {
+      expect(extractSignals(description).kind, description).toBe("change_description");
+    }
   });
 });
 

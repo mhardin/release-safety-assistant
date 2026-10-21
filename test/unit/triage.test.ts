@@ -36,6 +36,11 @@ describe("extractSignals", () => {
     expect(r.signature).toBe("none");
   });
 
+  it("recognizes Go panics as change-caused", () => {
+    const r = extractSignals("panic: runtime error: index out of range [3] with length 3\ngoroutine 7 [running]:");
+    expect(r.signals.map((s) => s.rule)).toEqual(["runtime-exception"]);
+  });
+
   it("orders signals strongest first", () => {
     const r = extractSignals(SAMPLES.mixedFailure);
     const weights = r.signals.map((s) => s.weight);

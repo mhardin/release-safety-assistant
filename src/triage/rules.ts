@@ -33,9 +33,14 @@ export const RULES: Rule[] = [
   { id: "crashloop", cause: "change", weight: 1.5, pattern: /CrashLoopBackOff/ },
 ];
 
-// Words that report a failure ("build failed", "Error: ..."), as opposed to
-// words that describe a change ("improve error handling").
-const FAILURE_WORDS = /\b(failed|failing|failure|exception|fatal|panic|crash(ed|es|ing)?|exit code [1-9])\b|\berror:|ERR!/i;
+// Text that reports a failure ("the build failed", "Error: ...", "FAILED"), as
+// opposed to a change description that mentions one ("fix the failing test",
+// "retry failed payments", "improve error handling").
+const FAILURE_REPORTS = [
+  /\b(build|job|step|tests?|deploy(ment)?|pipeline|run|release|ci|check|upgrade|install)\b[^.\n]{0,40}\b(failed|broke|crashed)\b/i,
+  /\b\d+ (failed|failing)\b|exit code:? [1-9]|^\s*(error|fatal|panic)\b/im,
+  /[A-Za-z]*(Error|Exception):|\bFAIL(ED|URE)?\b|ERR!|Traceback/, // case-sensitive: log output, not prose
+];
 
 // Logs are untrusted input: a test, a dependency, or an attacker can print
 // text aimed at the model. Lines like these are flagged and never reach it.
@@ -63,7 +68,8 @@ export function extractSignals(input: string): RuleResult {
   // Strongest signal first so the signature and evidence lead with it.
   signals.sort((a, b) => b.weight - a.weight);
 
-  const kind = signals.length === 0 && !FAILURE_WORDS.test(input) ? "change_description" : "failure_log";
+  const reportsFailure = FAILURE_REPORTS.some((re) => re.test(input));
+  const kind = signals.length === 0 && !reportsFailure ? "change_description" : "failure_log";
   const signature = signals.length > 0 ? `${signals[0].rule}:${normalizeLine(signals[0].line)}` : "none";
 
   const stage = DEPLOY_PATTERN.test(input) ? "deploy" : "ci";

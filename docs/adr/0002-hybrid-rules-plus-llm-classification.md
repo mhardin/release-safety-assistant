@@ -33,9 +33,10 @@ Run both, then merge them in a pure function:
    - Agree → average plus 0.1, capped at 0.95.
    - Disagree → the more confident side, minus 0.2, with the conflict stated
      in the reasoning.
-4. The action follows from the verdict: environment → retry, change → roll
-   back, unknown → retry once to tell them apart, change description →
-   staged rollout.
+4. The action follows from the verdict: environment → retry, unknown →
+   retry once to tell them apart, change → roll back in a deploy or fix
+   forward in pre-merge CI (nothing shipped), change description → staged
+   rollout.
 
 ### Addendum: logs are untrusted input (2026-10-21)
 
@@ -68,8 +69,8 @@ says.
   calling a model.
 - Confidence comes from a stated policy, not the model's self-report alone,
   so it can be explained and tuned.
-- The rules need upkeep. History (Milestone 3) should show which signatures
-  recur and whether the recommended action worked, which is the data needed
-  to tune weights.
+- The rules need upkeep. Recorded outcomes per signature (ADR 0004) show
+  which failures recur and whether the recommended action worked: the data
+  needed to tune weights.
 - The confidence numbers are heuristics, not calibrated probabilities.
   Calibrating them against labeled outcomes is future work.
