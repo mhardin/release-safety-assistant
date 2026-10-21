@@ -47,7 +47,9 @@ function Chat({ service }: { service: string }) {
   const messages = agent.state?.messages ?? [];
   const busy = agent.state?.busy ?? false;
 
-  useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth" }), [messages.length]);
+  useEffect(() => {
+    bottom.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();

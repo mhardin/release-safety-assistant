@@ -55,7 +55,10 @@ export function combineVerdict(rules: RuleResult, llm: LlmVerdict | null): Verdi
     }, rules);
   }
 
-  const evidence = dedupe([...ruleEvidence, ...llm.evidence]);
+  // The model often quotes the same lines the rules matched; keep the rule's labeled copy.
+  const ruleLines = rules.signals.map((s) => s.line);
+  const llmOnly = llm.evidence.filter((e) => !ruleLines.some((line) => line.includes(e.trim())));
+  const evidence = dedupe([...ruleEvidence, ...llmOnly]);
 
   // No rule fired: trust the model, but cap confidence since nothing corroborates it.
   if (ruleScore.cause === "unknown") {

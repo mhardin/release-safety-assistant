@@ -92,6 +92,12 @@ describe("combineVerdict", () => {
     expect(v.confidence).toBeLessThanOrEqual(0.95);
   });
 
+  it("drops model evidence that repeats a line the rules already matched", () => {
+    const v = combineVerdict(envRules, llm({ evidence: ["npm ERR! code ETIMEDOUT", "a line only the model saw"] }));
+    expect(v.evidence.filter((e) => e.includes("npm ERR! code ETIMEDOUT"))).toHaveLength(1);
+    expect(v.evidence).toContain("a line only the model saw");
+  });
+
   it("caps model confidence when no rule corroborates it", () => {
     const rules = extractSignals("something odd happened and the job failed");
     const v = combineVerdict(rules, llm({ cause: "change", confidence: 0.99 }));
