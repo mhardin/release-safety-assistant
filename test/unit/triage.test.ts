@@ -57,7 +57,7 @@ describe("normalizeLine", () => {
 
 describe("scoreRules", () => {
   it("returns unknown with zero confidence when nothing matched", () => {
-    expect(scoreRules({ kind: "failure_log", signals: [], signature: "none" })).toEqual({ cause: "unknown", confidence: 0 });
+    expect(scoreRules({ kind: "failure_log", signals: [], signature: "none", suspicious: [] })).toEqual({ cause: "unknown", confidence: 0 });
   });
 
   it("is less confident when signals conflict", () => {

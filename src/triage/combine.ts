@@ -39,8 +39,18 @@ export function chooseAction(kind: InputKind, cause: Cause): Action {
 
 export function combineVerdict(rules: RuleResult, llm: LlmVerdict | null): Verdict {
   const ruleScore = scoreRules(rules);
-  const ruleEvidence = rules.signals.map((s) => `[${s.rule}] ${s.line}`);
-  const kind = llm?.kind ?? rules.kind;
+  const ruleEvidence = [
+    ...rules.suspicious.map((line) => `[injection] ${line}`),
+    ...rules.signals.map((s) => `[${s.rule}] ${s.line}`),
+  ];
+  // If the text reports a failure, never let the model downgrade it to a change
+  // description: that would recommend a staged rollout for a broken build.
+  const kind = rules.kind === "failure_log" ? "failure_log" : (llm?.kind ?? rules.kind);
+  // Instruction-like text in the log means the model may have been steered.
+  const distrustModel = rules.suspicious.length > 0;
+  const distrustNote = distrustModel
+    ? " The input contains text addressed to the AI, so the model's opinion is given less weight."
+    : "";
 
   if (!llm) {
     return finish({
@@ -56,30 +66,32 @@ export function combineVerdict(rules: RuleResult, llm: LlmVerdict | null): Verdi
   }
 
   // The model often quotes the same lines the rules matched; keep the rule's labeled copy.
-  const ruleLines = rules.signals.map((s) => s.line);
+  const ruleLines = [...rules.signals.map((s) => s.line), ...rules.suspicious];
   const llmOnly = llm.evidence.filter((e) => !ruleLines.some((line) => line.includes(e.trim())));
   const evidence = dedupe([...ruleEvidence, ...llmOnly]);
 
   // No rule fired: trust the model, but cap confidence since nothing corroborates it.
   if (ruleScore.cause === "unknown") {
-    return finish({ kind, cause: llm.cause, confidence: Math.min(llm.confidence, 0.75), evidence, reasoning: llm.reasoning, source: "llm" }, rules);
+    const cap = distrustModel ? 0.5 : 0.75;
+    return finish({ kind, cause: llm.cause, confidence: Math.min(llm.confidence, cap), evidence, reasoning: llm.reasoning + distrustNote, source: "llm" }, rules);
   }
 
   // Rules and model agree: confidence goes up.
   if (llm.cause === ruleScore.cause) {
     const confidence = Math.min(0.95, (llm.confidence + ruleScore.confidence) / 2 + 0.1);
-    return finish({ kind, cause: llm.cause, confidence, evidence, reasoning: llm.reasoning, source: "rules+llm" }, rules);
+    return finish({ kind, cause: llm.cause, confidence, evidence, reasoning: llm.reasoning + distrustNote, source: "rules+llm" }, rules);
   }
 
   // They disagree: take the more confident side, discount it, and say so.
-  const llmWins = llm.confidence > ruleScore.confidence;
+  // A possibly-steered model never overrides the rules.
+  const llmWins = !distrustModel && llm.confidence > ruleScore.confidence;
   const winner = llmWins ? llm : ruleScore;
   return finish({
     kind,
     cause: winner.cause,
     confidence: Math.max(0.3, winner.confidence - 0.2),
     evidence,
-    reasoning: `${llm.reasoning} Note: the pattern rules pointed at ${ruleScore.cause} while the model said ${llm.cause}; ${llmWins ? "going with the model" : "going with the rules"} at reduced confidence.`,
+    reasoning: `${llm.reasoning} Note: the pattern rules pointed at ${ruleScore.cause} while the model said ${llm.cause}; ${llmWins ? "going with the model" : "going with the rules"} at reduced confidence.${distrustNote}`,
     source: "rules+llm",
   }, rules);
 }

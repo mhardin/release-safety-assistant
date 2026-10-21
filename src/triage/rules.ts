@@ -26,19 +26,27 @@ export const RULES: Rule[] = [
   // The change itself
   { id: "compile", cause: "change", weight: 3, pattern: /error TS\d+|SyntaxError|cannot find symbol|compilation failed|undefined reference to/i },
   { id: "assertion", cause: "change", weight: 2, pattern: /AssertionError|assertion failed|Expected[^\n]{0,80}(Received|but (got|was))|expect\(.+\)\.to/i },
-  { id: "runtime-exception", cause: "change", weight: 2, pattern: /TypeError|ReferenceError|NullPointerException|Cannot read propert(y|ies) of (undefined|null)|is not a function/i },
+  { id: "runtime-exception", cause: "change", weight: 2, pattern: /TypeError|ReferenceError|NullPointerException|Cannot read propert(y|ies) of (undefined|null)|is not a function|^panic: |index out of range/i },
   { id: "missing-module", cause: "change", weight: 1.5, pattern: /Cannot find module|Module not found|ERESOLVE unable to resolve/i },
   { id: "lint", cause: "change", weight: 1.5, pattern: /\d+ problems? \(\d+ errors?|eslint.*\berror\b/i },
   { id: "migration", cause: "change", weight: 2, pattern: /migration failed|column "?\w+"? does not exist|relation "?\w+"? does not exist/i },
   { id: "crashloop", cause: "change", weight: 1.5, pattern: /CrashLoopBackOff/ },
 ];
 
-const FAILURE_WORDS = /\b(error|fail(ed|ure)?|exception|fatal|panic|exit code [1-9])\b/i;
+// Words that report a failure ("build failed", "Error: ..."), as opposed to
+// words that describe a change ("improve error handling").
+const FAILURE_WORDS = /\b(failed|failing|failure|exception|fatal|panic|crash(ed|es|ing)?|exit code [1-9])\b|\berror:|ERR!/i;
+
+// Logs are untrusted input: a test, a dependency, or an attacker can print
+// text aimed at the model. Lines like these are flagged and never reach it.
+const INSTRUCTION_PATTERN =
+  /ignore (all |any |your |the )?(previous|prior|above|earlier) instructions|\b(note|message|instructions?) (to|for) (the )?(ai|assistant|llm|model|triage)\b|system (override|prompt)|\b(classify|mark|label|treat) (it|this)( failure| issue)? as\b|\bconfidence\s*[=:]\s*(1(\.0+)?|100%?)\b/i;
 
 /** Scan input line by line; each rule fires at most once, on its first match. */
 export function extractSignals(input: string): RuleResult {
   const lines = input.split(/\r?\n/);
   const signals: Signal[] = [];
+  const suspicious = lines.filter((l) => INSTRUCTION_PATTERN.test(l)).map((l) => l.trim().slice(0, 240));
 
   for (const rule of RULES) {
     const line = lines.find((l) => rule.pattern.test(l));
@@ -53,7 +61,15 @@ export function extractSignals(input: string): RuleResult {
   const kind = signals.length === 0 && !FAILURE_WORDS.test(input) ? "change_description" : "failure_log";
   const signature = signals.length > 0 ? `${signals[0].rule}:${normalizeLine(signals[0].line)}` : "none";
 
-  return { kind, signals, signature };
+  return { kind, signals, signature, suspicious };
+}
+
+/** Replace flagged lines before the input is sent to the model. */
+export function redactInstructions(input: string): string {
+  return input
+    .split(/\r?\n/)
+    .map((l) => (INSTRUCTION_PATTERN.test(l) ? "[line removed: it contained instructions addressed to the AI]" : l))
+    .join("\n");
 }
 
 /**

@@ -21,6 +21,8 @@ export interface RuleResult {
   signals: Signal[];
   /** Normalized fingerprint of the top signal, used to find repeat failures. */
   signature: string;
+  /** Lines that look like instructions to the AI (possible prompt injection). */
+  suspicious: string[];
 }
 
 /** What we accept back from the LLM after validation. */
