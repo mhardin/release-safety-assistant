@@ -3,7 +3,7 @@ import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "rea
 import type { ReleaseAgent } from "../server/agent";
 import { SAMPLES } from "../shared/samples";
 import { normalizeServiceName } from "../shared/service";
-import type { AgentState, ChatMessage, Verdict } from "../shared/types";
+import type { AgentState, ChatMessage, KnownPattern, Verdict } from "../shared/types";
 import { ActionControls, RolloutPanel } from "./Rollout";
 
 const SAMPLE_LABELS: Record<keyof typeof SAMPLES, string> = {
@@ -157,6 +157,22 @@ const ACTION_LABEL: Record<Verdict["action"], string> = {
   staged_rollout: "Staged rollout (canary → 25% → 100%)",
 };
 
+const PATTERN_LABEL: Record<KnownPattern["label"], string> = {
+  flaky: "Known flaky",
+  persistent: "Retry hasn't fixed this before",
+  recurring: "Seen before",
+};
+
+function PatternBadge({ pattern }: { pattern: KnownPattern }) {
+  const retries = pattern.retriesSucceeded + pattern.retriesFailed;
+  return (
+    <p className={`pattern pattern-${pattern.label}`}>
+      <b>{PATTERN_LABEL[pattern.label]}</b> · {pattern.occurrences}× in 30 days
+      {retries > 0 && ` · retry fixed it ${pattern.retriesSucceeded} of ${retries} times`}
+    </p>
+  );
+}
+
 function VerdictCard({ verdict }: { verdict: Verdict }) {
   const pct = Math.round(verdict.confidence * 100);
   const title = verdict.kind === "change_description" ? "Change assessment" : `Likely cause: ${verdict.cause}`;
@@ -167,6 +183,7 @@ function VerdictCard({ verdict }: { verdict: Verdict }) {
         {verdict.kind === "failure_log" && <span className="confidence">{pct}% confidence</span>}
         <span className="source">via {verdict.source}</span>
       </div>
+      {verdict.history && <PatternBadge pattern={verdict.history} />}
       <p>{verdict.reasoning}</p>
       {verdict.evidence.length > 0 && (
         <>

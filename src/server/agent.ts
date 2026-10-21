@@ -11,8 +11,9 @@ import {
   type RolloutState,
 } from "../shared/rollout";
 import { clip } from "../shared/text";
-import type { Action, AgentState, ChatMessage, LlmVerdict, RuleResult, Verdict } from "../shared/types";
+import type { Action, AgentState, ChatMessage, KnownPattern, LlmVerdict, RuleResult, Verdict } from "../shared/types";
 import { combineVerdict } from "../triage/combine";
+import { HISTORY_WINDOW_DAYS, applyHistory, summarizeHistory, type PastIncident } from "../triage/history";
 import { classifyWithLlm } from "../triage/llm";
 import { extractSignals } from "../triage/rules";
 
@@ -52,8 +53,11 @@ export class ReleaseAgent extends Agent<Env, AgentState> {
    * The LLM step. Kept as a field so integration tests can swap in a fake
    * instead of calling Workers AI (which needs a Cloudflare login and isn't deterministic).
    */
-  classify: (input: string, rules: RuleResult) => Promise<LlmVerdict | null> = (input, rules) =>
-    classifyWithLlm(this.env.AI, input, rules);
+  classify: (input: string, rules: RuleResult, history: KnownPattern | null) => Promise<LlmVerdict | null> = (
+    input,
+    rules,
+    history,
+  ) => classifyWithLlm(this.env.AI, input, rules, history);
 
   async onStart() {
     this.sql`CREATE TABLE IF NOT EXISTS incidents (
@@ -67,6 +71,7 @@ export class ReleaseAgent extends Agent<Env, AgentState> {
       summary TEXT NOT NULL,
       outcome TEXT
     )`;
+    this.sql`CREATE INDEX IF NOT EXISTS incidents_by_signature ON incidents (signature, created_at)`;
     if (!this.state.service) this.setState({ ...this.state, service: this.name });
 
     // A Durable Object can be restarted mid-triage (deploy, eviction, crash).
@@ -90,9 +95,11 @@ export class ReleaseAgent extends Agent<Env, AgentState> {
     this.addMessage({ role: "user", text: clip(text, 1_000, 4_000) }, true);
     try {
       const rules = extractSignals(text);
-      const llm = await this.classify(text, rules);
+      // Looked up before this incident is stored, so it only sees earlier ones.
+      const pattern = this.knownPattern(rules.signature);
+      const llm = await this.classify(text, rules, pattern);
       const incidentId = crypto.randomUUID();
-      const verdict: Verdict = { ...combineVerdict(rules, llm), incidentId };
+      const verdict: Verdict = { ...applyHistory(combineVerdict(rules, llm), pattern), incidentId };
 
       this.sql`INSERT INTO incidents (id, created_at, kind, cause, confidence, action, signature, summary)
         VALUES (${incidentId}, ${Date.now()}, ${verdict.kind}, ${verdict.cause}, ${verdict.confidence},
@@ -109,6 +116,15 @@ export class ReleaseAgent extends Agent<Env, AgentState> {
   @callable()
   async history(limit = 20): Promise<IncidentRow[]> {
     return this.sql<IncidentRow>`SELECT * FROM incidents ORDER BY created_at DESC LIMIT ${limit}`;
+  }
+
+  /** Earlier incidents of this service with the same failure signature. */
+  private knownPattern(signature: string): KnownPattern | null {
+    if (signature === "none") return null;
+    const since = Date.now() - HISTORY_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+    const past = this.sql<PastIncident>`SELECT action, outcome, created_at FROM incidents
+      WHERE signature = ${signature} AND created_at > ${since} ORDER BY created_at DESC LIMIT 50`;
+    return summarizeHistory(signature, past);
   }
 
   // ---- Executing the recommended action -------------------------------------

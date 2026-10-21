@@ -93,3 +93,7 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .samples button { font-size: 0.8rem; padding: 3px 8px; }
 .composer { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
 .error { color: var(--change); margin: 0; }
+
+.pattern { display: inline-block; margin: 8px 0 0; padding: 2px 8px; border-radius: 999px; font-size: 0.8rem; background: var(--code-bg); }
+.pattern-flaky { color: var(--env); }
+.pattern-persistent { color: var(--change); }

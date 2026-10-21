@@ -60,6 +60,18 @@ export interface Verdict {
   source: "rules" | "llm" | "rules+llm";
   /** Set by the agent once the verdict is stored; used to act on it. */
   incidentId?: string;
+  /** Earlier incidents with the same signature for this service, if any. */
+  history?: KnownPattern;
+}
+
+/** What this service's history says about a failure signature. */
+export interface KnownPattern {
+  signature: string;
+  occurrences: number; // earlier incidents with this signature, in the window
+  lastSeen: number; // epoch ms
+  retriesSucceeded: number;
+  retriesFailed: number;
+  label: "flaky" | "persistent" | "recurring";
 }
 
 export interface ChatMessage {

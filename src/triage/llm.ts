@@ -1,5 +1,6 @@
 import { clip } from "../shared/text";
-import type { LlmVerdict, RuleResult } from "../shared/types";
+import type { KnownPattern, LlmVerdict, RuleResult } from "../shared/types";
+import { describeForPrompt } from "./history";
 import { redactInstructions } from "./rules";
 
 export const MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
@@ -46,15 +47,17 @@ Rules:
 - Quote short, exact log lines as evidence. Never invent lines.
 - confidence is 0 to 1. Use below 0.5 when evidence is thin or mixed.
 - Pattern-matching hints are provided; they can be wrong, so weigh them against the log.
+- Service history says whether this exact failure happened before and whether retrying fixed it.
+  A failure that retry has fixed repeatedly is likely environmental; one retry has not fixed is likely not.
 - Keep reasoning to 2-3 sentences.`;
 
-export function buildMessages(input: string, rules: RuleResult) {
+export function buildMessages(input: string, rules: RuleResult, history: KnownPattern | null = null) {
   const hints = rules.signals.length
     ? rules.signals.map((s) => `- ${s.rule} (${s.cause}): ${s.line}`).join("\n")
     : "- none matched";
   return [
     { role: "system", content: SYSTEM_PROMPT },
-    { role: "user", content: `Pattern-matching hints:\n${hints}\n\nInput:\n"""\n${truncate(redactInstructions(input))}\n"""` },
+    { role: "user", content: `Pattern-matching hints:\n${hints}\n\nService history: ${describeForPrompt(history)}\n\nInput:\n"""\n${truncate(redactInstructions(input))}\n"""` },
   ];
 }
 
@@ -93,11 +96,16 @@ export function parseLlmVerdict(raw: unknown): LlmVerdict | null {
 }
 
 /** Ask Llama 3.3 for a structured verdict. Returns null if the call or the output fails. */
-export async function classifyWithLlm(ai: Ai, input: string, rules: RuleResult): Promise<LlmVerdict | null> {
+export async function classifyWithLlm(
+  ai: Ai,
+  input: string,
+  rules: RuleResult,
+  history: KnownPattern | null = null,
+): Promise<LlmVerdict | null> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const call = ai.run(MODEL, {
-      messages: buildMessages(input, rules),
+      messages: buildMessages(input, rules, history),
       response_format: { type: "json_schema", json_schema: VERDICT_SCHEMA },
       max_tokens: 600,
       temperature: 0.1,
