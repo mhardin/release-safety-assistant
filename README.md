@@ -36,28 +36,32 @@ Workers AI (Llama 3.3 70B), in TypeScript.
 
 ```mermaid
 flowchart TB
-  UI["React chat UI<br/>(Workers static assets)"]
-
-  subgraph Worker["Cloudflare Worker"]
-    Router["fetch handler<br/>validate service name<br/>routeAgentRequest"]
-    subgraph Agent["ReleaseAgent: Durable Object, one per service"]
-      Triage["triage()"]
-      State["state: chat + rollout<br/>(synced to every tab)"]
-      DB[("SQLite<br/>incidents: signature,<br/>action, outcome")]
-    end
-    WF["RolloutWorkflow<br/>durable steps · bake sleeps ·<br/>approval gates · auto-rollback"]
-  end
-
+  UI["Browser: React chat UI<br/>(served as Workers static assets)"]
+  Router["Worker fetch handler<br/>validates service name, routes /agents/*"]
+  Agent["ReleaseAgent<br/>Durable Object, one per service<br/>triage · live state · SQLite history"]
   AI["Workers AI<br/>Llama 3.3 70B"]
+  WF["RolloutWorkflow<br/>durable steps · bake · approval gates · auto-rollback"]
 
-  UI <-- "WebSocket: RPC + state sync" --> Router --> Agent
-  Triage -- "1 rules: signals, signature,<br/>injection flags" --> Triage
-  Triage -- "2 same-signature history" --> DB
-  Triage -- "3 redacted log + hints + history" --> AI
-  Triage -- "4 merge + history policy → verdict" --> State
-  Agent -- "startAction / gate decision" --> WF
-  WF -- "progress · outcome" --> Agent
-  Agent -- "outcome → incident row" --> DB
+  UI <-->|"WebSocket: RPC calls + state sync"| Router
+  Router --> Agent
+  Agent -->|"redacted log + rule hints + history"| AI
+  AI -->|"JSON verdict"| Agent
+  Agent -->|"start · gate decisions"| WF
+  WF -->|"progress · outcome"| Agent
+```
+
+Inside `triage()`:
+
+```mermaid
+flowchart LR
+  Log["Pasted log"] --> Rules["Rules<br/>signals · CI or deploy ·<br/>signature · injection flags"]
+  Rules --> History["History<br/>same signature,<br/>last 30 days"]
+  Rules --> Model["Llama 3.3<br/>JSON schema"]
+  History --> Model
+  Rules --> Merge["Merge policy<br/>+ history policy"]
+  Model --> Merge
+  History --> Merge
+  Merge --> Verdict["Verdict, confidence,<br/>evidence, action"]
 ```
 
 A staged rollout, step by step:
