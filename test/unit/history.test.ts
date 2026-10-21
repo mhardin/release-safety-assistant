@@ -69,11 +69,18 @@ describe("applyHistory", () => {
     expect(v.confidence).toBe(change.confidence);
   });
 
-  it("lowers confidence when retry has not fixed this failure before", () => {
-    const before = envVerdict();
+  it("stops recommending retry when retry has not fixed this failure before", () => {
+    const before = envVerdict(); // pre-merge CI
     const v = applyHistory(before, pattern({ label: "persistent", retriesFailed: 2 }));
+    expect(v).toMatchObject({ cause: "unknown", action: "fix_forward" }); // keep the merge blocked
     expect(v.confidence).toBeCloseTo(before.confidence - 0.2);
     expect(v.reasoning).toMatch(/retrying did not fix it 2 times/);
+  });
+
+  it("recommends rollback for a persistent failure in a deploy", () => {
+    const deploy = combineVerdict(extractSignals("Deploying api to prod\nnpm ERR! code ETIMEDOUT"), null);
+    expect(deploy).toMatchObject({ stage: "deploy", action: "retry" });
+    expect(applyHistory(deploy, pattern({ label: "persistent", retriesFailed: 1 })).action).toBe("rollback");
   });
 
   it("ignores history for change descriptions", () => {

@@ -1,4 +1,5 @@
 import type { KnownPattern, Verdict } from "../shared/types";
+import { chooseAction } from "./combine";
 
 // Per-service memory: has this exact failure (same signature) happened before,
 // and did retrying it work? This is what turns "a timeout" into "the npm
@@ -39,13 +40,18 @@ export function applyHistory(verdict: Verdict, pattern: KnownPattern | null): Ve
   if (!pattern || verdict.kind === "change_description") return verdict;
 
   const seen = `Seen ${pattern.occurrences} time${pattern.occurrences === 1 ? "" : "s"} before in the last ${HISTORY_WINDOW_DAYS} days`;
-  const withHistory = (changes: Partial<Verdict>, note: string): Verdict => ({
-    ...verdict,
-    ...changes,
-    confidence: round(changes.confidence ?? verdict.confidence),
-    reasoning: `${verdict.reasoning} ${note}`,
-    history: pattern,
-  });
+  const withHistory = (changes: Partial<Verdict>, note: string): Verdict => {
+    const cause = changes.cause ?? verdict.cause;
+    return {
+      ...verdict,
+      ...changes,
+      confidence: round(changes.confidence ?? verdict.confidence),
+      // The action follows the (possibly changed) cause unless set explicitly.
+      action: changes.action ?? chooseAction(verdict.kind, cause, verdict.stage),
+      reasoning: `${verdict.reasoning} ${note}`,
+      history: pattern,
+    };
+  };
 
   if (pattern.label === "flaky" && verdict.cause !== "change") {
     return withHistory(
@@ -54,10 +60,16 @@ export function applyHistory(verdict: Verdict, pattern: KnownPattern | null): Ve
     );
   }
 
-  if (pattern.label === "persistent" && verdict.cause === "environment") {
+  // Retrying again is bad advice. In a deploy, return to the known-good
+  // version; in CI, keep the merge blocked until the cause is found.
+  if (pattern.label === "persistent" && verdict.cause !== "change") {
     return withHistory(
-      { confidence: Math.max(0.3, verdict.confidence - 0.2) },
-      `Caution: ${seen.toLowerCase()}, and retrying did not fix it ${pattern.retriesFailed} time${pattern.retriesFailed === 1 ? "" : "s"}. It may not be transient.`,
+      {
+        cause: "unknown",
+        confidence: Math.max(0.3, verdict.confidence - 0.2),
+        action: verdict.stage === "deploy" ? "rollback" : "fix_forward",
+      },
+      `Caution: ${seen.toLowerCase()}, and retrying did not fix it ${pattern.retriesFailed} time${pattern.retriesFailed === 1 ? "" : "s"}, so another retry is unlikely to help.`,
     );
   }
 

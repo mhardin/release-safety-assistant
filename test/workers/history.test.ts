@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ReleaseAgent } from "../../src/server/agent";
 import { SAMPLES } from "../../src/shared/samples";
 import type { KnownPattern } from "../../src/shared/types";
+import { extractSignals } from "../../src/triage/rules";
 
 // History built the real way: triage a failure, run the recommended retry
 // through the Workflow, and let the outcome land in SQLite. Later triage of
@@ -78,5 +79,18 @@ describe("history-aware triage", () => {
     await a.stub.triage(SAMPLES.environmentFailure);
     expect((await a.stub.triage(SAMPLES.environmentFailure)).history?.occurrences).toBe(1);
     expect((await b.stub.triage(SAMPLES.environmentFailure)).history).toBeUndefined();
+  });
+});
+
+describe("history window", () => {
+  it("ignores incidents older than 30 days", async () => {
+    const { stub } = await freshAgent();
+    const signature = extractSignals(SAMPLES.environmentFailure).signature;
+    await runInDurableObject(stub, (agent: ReleaseAgent) => {
+      const old = Date.now() - 31 * 24 * 60 * 60 * 1000;
+      agent.sql`INSERT INTO incidents (id, created_at, kind, cause, confidence, action, signature, summary, outcome)
+        VALUES ('old-1', ${old}, 'failure_log', 'environment', 0.9, 'retry', ${signature}, 'old', 'succeeded')`;
+    });
+    expect((await stub.triage(SAMPLES.environmentFailure)).history).toBeUndefined();
   });
 });

@@ -23,8 +23,10 @@ export function ActionControls({
   if (verdict.action === "fix_forward") {
     return (
       <p className="guidance">
-        This failed in pre-merge CI and points at the change, so there's nothing to roll back. Fix it on the branch and
-        keep the merge blocked until CI is green.
+        {verdict.cause === "change"
+          ? "This failed in pre-merge CI and points at the change, so there's nothing to roll back. Fix it on the branch"
+          : "Retrying hasn't fixed this before, so don't merge on a retry. Find the cause (or escalate the environment issue)"}{" "}
+        and keep the merge blocked until CI is green.
       </p>
     );
   }

@@ -29,9 +29,11 @@ environment, retry" is bad advice.
    - in the model's prompt, so its reasoning can weigh it;
    - in a pure `applyHistory` step after the rules + model merge:
      `flaky` raises confidence in environment (and turns unknown into
-     environment); `persistent` lowers confidence in environment;
-     **history never overrides change evidence**, since a test that fails
-     for a real bug can also have been flaky in the past.
+     environment); `persistent` turns environment into unknown with lower
+     confidence and **stops recommending retry**: roll back in a deploy, keep
+     the merge blocked in CI. The action is recomputed whenever history
+     changes the cause. **History never overrides change evidence**, since a
+     test that fails for a real bug can also have been flaky in the past.
 5. History is looked up **before** the new incident is stored, so a verdict
    only reflects earlier incidents.
 
