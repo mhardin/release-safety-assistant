@@ -2,6 +2,7 @@ import { routeAgentRequest } from "agents";
 import { isValidServiceName } from "../shared/service";
 
 export { ReleaseAgent } from "./agent";
+export { RolloutWorkflow } from "./rollout-workflow";
 
 // The only agent route this app serves: /agents/release-agent/<service>[/...]
 const AGENT_PATH = /^\/agents\/release-agent\/([^/]+)(?:\/|$)/;

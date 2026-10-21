@@ -64,6 +64,31 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .verdict code { background: var(--code-bg); padding: 1px 4px; border-radius: 4px; font-size: 0.78rem; word-break: break-word; }
 .action { margin-bottom: 0; }
 
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.muted { color: var(--muted); font-size: 0.85rem; }
+
+.action-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; font-size: 0.85rem; color: var(--muted); }
+.action-controls select { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; }
+.guidance { margin: 10px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--code-bg); font-size: 0.9rem; }
+
+.rollout { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 10px; padding: 10px 12px; }
+.rollout.result-succeeded { border-left-color: #16a34a; }
+.rollout.result-failed, .rollout.result-rolled_back, .rollout.result-rejected, .rollout.result-timed_out { border-left-color: var(--change); }
+.rollout-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; margin-bottom: 6px; }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.step { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 0.9rem; }
+.step .icon { width: 1.2em; text-align: center; }
+.step.status-pending { color: var(--muted); }
+.step.status-running .icon { color: var(--accent); }
+.step.status-waiting { font-weight: 600; }
+.step.status-passed .icon, .step.status-approved .icon { color: #16a34a; }
+.step.status-failed .icon, .step.status-rejected .icon { color: var(--change); }
+.health { font-size: 0.75rem; font-variant-numeric: tabular-nums; padding: 1px 6px; border-radius: 999px; background: var(--code-bg); }
+.health.bad { color: var(--change); }
+.gate-buttons { display: inline-flex; gap: 6px; }
+.gate-buttons button { font-size: 0.8rem; padding: 3px 10px; }
+.outcome { margin: 8px 0 0; font-size: 0.9rem; }
+
 .samples { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; color: var(--muted); font-size: 0.85rem; }
 .samples button { font-size: 0.8rem; padding: 3px 8px; }
 .composer { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }

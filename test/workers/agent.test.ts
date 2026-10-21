@@ -60,7 +60,7 @@ describe("ReleaseAgent.triage", () => {
   it("falls back to rules when the model returns nothing usable", async () => {
     const stub = await agentFor(async () => null);
     const result = await stub.triage(SAMPLES.changeFailure);
-    expect(result).toMatchObject({ cause: "change", action: "rollback", source: "rules" });
+    expect(result).toMatchObject({ cause: "change", action: "fix_forward", source: "rules" });
   });
 
   it("falls back to rules when the real Workers AI call fails", async () => {

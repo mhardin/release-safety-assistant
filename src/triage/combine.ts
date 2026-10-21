@@ -1,4 +1,4 @@
-import type { Action, Cause, InputKind, LlmVerdict, RuleResult, Verdict } from "../shared/types";
+import type { Action, Cause, InputKind, LlmVerdict, PipelineStage, RuleResult, Verdict } from "../shared/types";
 
 // Merge the deterministic rule result with the (optional) LLM verdict.
 // Rules are cheap and predictable but shallow; the LLM reads context but can be
@@ -29,12 +29,14 @@ export function scoreRules(rules: RuleResult): RuleScore {
   };
 }
 
-export function chooseAction(kind: InputKind, cause: Cause): Action {
+export function chooseAction(kind: InputKind, cause: Cause, stage: PipelineStage): Action {
   if (kind === "change_description") return "staged_rollout";
-  // Environment failures are usually transient: retry. A failure caused by the
-  // change won't go away on retry: roll back. When unsure, a single retry is the
-  // cheapest way to tell the two apart.
-  return cause === "change" ? "rollback" : "retry";
+  // Environment failures are usually transient: retry. When unsure, a single
+  // retry is the cheapest way to tell the two causes apart.
+  if (cause !== "change") return "retry";
+  // A change-caused failure won't go away on retry. In a live environment, roll
+  // back; in pre-merge CI nothing shipped, so fix forward and keep the merge blocked.
+  return stage === "deploy" ? "rollback" : "fix_forward";
 }
 
 export function combineVerdict(rules: RuleResult, llm: LlmVerdict | null): Verdict {
@@ -96,8 +98,14 @@ export function combineVerdict(rules: RuleResult, llm: LlmVerdict | null): Verdi
   }, rules);
 }
 
-function finish(v: Omit<Verdict, "action" | "signature">, rules: RuleResult): Verdict {
-  return { ...v, confidence: round(v.confidence), action: chooseAction(v.kind, v.cause), signature: rules.signature };
+function finish(v: Omit<Verdict, "action" | "signature" | "stage">, rules: RuleResult): Verdict {
+  return {
+    ...v,
+    confidence: round(v.confidence),
+    stage: rules.stage,
+    action: chooseAction(v.kind, v.cause, rules.stage),
+    signature: rules.signature,
+  };
 }
 
 function round(n: number): number {

@@ -44,7 +44,7 @@ describe("prompt injection in pasted logs", () => {
   it("never lets a possibly-steered model override the rules", () => {
     const v = combineVerdict(extractSignals(INJECTED_ASSERTION), llm({}));
     expect(v.cause).toBe("change");
-    expect(v.action).toBe("rollback");
+    expect(v.action).toBe("fix_forward"); // pre-merge CI: nothing to roll back
     expect(v.evidence[0]).toMatch(/^\[injection\]/);
     expect(v.reasoning).toMatch(/addressed to the AI/);
   });

@@ -43,6 +43,23 @@ describe("extractSignals", () => {
   });
 });
 
+describe("pipeline stage", () => {
+  it("treats test and install logs as pre-merge CI", () => {
+    expect(extractSignals(SAMPLES.changeFailure).stage).toBe("ci");
+    expect(extractSignals(SAMPLES.environmentFailure).stage).toBe("ci");
+  });
+
+  it("recognizes deploy logs", () => {
+    expect(extractSignals(SAMPLES.mixedFailure).stage).toBe("deploy");
+    expect(extractSignals("kubectl rollout status deploy/api\nerror: timed out").stage).toBe("deploy");
+  });
+
+  it("recommends fix-forward for a failing test and rollback for a crashing deploy", () => {
+    expect(combineVerdict(extractSignals(SAMPLES.changeFailure), null).action).toBe("fix_forward");
+    expect(combineVerdict(extractSignals(SAMPLES.mixedFailure), null).action).toBe("rollback");
+  });
+});
+
 describe("normalizeLine", () => {
   it("gives the same signature to the same failure on different runs", () => {
     const a = normalizeLine("2026-10-21T14:02:11Z connect ETIMEDOUT 104.16.27.34:443 for req 3f9c2ab91");
@@ -57,7 +74,7 @@ describe("normalizeLine", () => {
 
 describe("scoreRules", () => {
   it("returns unknown with zero confidence when nothing matched", () => {
-    expect(scoreRules({ kind: "failure_log", signals: [], signature: "none", suspicious: [] })).toEqual({ cause: "unknown", confidence: 0 });
+    expect(scoreRules({ kind: "failure_log", stage: "ci", signals: [], signature: "none", suspicious: [] })).toEqual({ cause: "unknown", confidence: 0 });
   });
 
   it("is less confident when signals conflict", () => {
@@ -68,11 +85,14 @@ describe("scoreRules", () => {
 });
 
 describe("chooseAction", () => {
-  it("maps cause to action", () => {
-    expect(chooseAction("failure_log", "environment")).toBe("retry");
-    expect(chooseAction("failure_log", "change")).toBe("rollback");
-    expect(chooseAction("failure_log", "unknown")).toBe("retry");
-    expect(chooseAction("change_description", "unknown")).toBe("staged_rollout");
+  it("maps cause and pipeline stage to action", () => {
+    expect(chooseAction("failure_log", "environment", "ci")).toBe("retry");
+    expect(chooseAction("failure_log", "environment", "deploy")).toBe("retry");
+    expect(chooseAction("failure_log", "unknown", "deploy")).toBe("retry");
+    expect(chooseAction("failure_log", "change", "deploy")).toBe("rollback");
+    // Nothing was deployed pre-merge, so there is nothing to roll back.
+    expect(chooseAction("failure_log", "change", "ci")).toBe("fix_forward");
+    expect(chooseAction("change_description", "unknown", "ci")).toBe("staged_rollout");
   });
 });
 
@@ -101,7 +121,7 @@ describe("combineVerdict", () => {
   it("caps model confidence when no rule corroborates it", () => {
     const rules = extractSignals("something odd happened and the job failed");
     const v = combineVerdict(rules, llm({ cause: "change", confidence: 0.99 }));
-    expect(v).toMatchObject({ cause: "change", confidence: 0.75, source: "llm", action: "rollback" });
+    expect(v).toMatchObject({ cause: "change", confidence: 0.75, source: "llm", action: "fix_forward" });
   });
 
   it("discounts confidence and explains when rules and model disagree", () => {

@@ -1,9 +1,10 @@
 import { useAgent } from "agents/react";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import type { ReleaseAgent } from "../server/agent";
 import { SAMPLES } from "../shared/samples";
 import { normalizeServiceName } from "../shared/service";
 import type { AgentState, ChatMessage, Verdict } from "../shared/types";
+import { ActionControls, RolloutPanel } from "./Rollout";
 
 const SAMPLE_LABELS: Record<keyof typeof SAMPLES, string> = {
   environmentFailure: "Registry timeout",
@@ -49,10 +50,24 @@ function Chat({ service }: { service: string }) {
 
   const messages = agent.state?.messages ?? [];
   const busy = agent.state?.busy ?? false;
+  const rollout = agent.state?.rollout ?? null;
+  const rolloutActive = !!rollout && !rollout.outcome;
+  // Only the newest verdict can be acted on, so stale recommendations can't be started by accident.
+  const latestVerdictId = [...messages].reverse().find((m) => m.verdict)?.id;
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
+
+  // Wrap an agent call so its error shows under the composer.
+  async function run(call: () => Promise<unknown>) {
+    setError(null);
+    try {
+      await call();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -76,10 +91,28 @@ function Chat({ service }: { service: string }) {
             separately from other services.
           </p>
         )}
-        {messages.map((m) => <Message key={m.id} message={m} />)}
+        {messages.map((m) => (
+          <Message
+            key={m.id}
+            message={m}
+            actions={
+              m.id === latestVerdictId && m.verdict?.incidentId ? (
+                <ActionControls
+                  verdict={m.verdict}
+                  disabled={rolloutActive || busy}
+                  onStart={(failAt) => run(() => agent.stub.startAction(m.verdict!.incidentId!, failAt))}
+                />
+              ) : null
+            }
+          />
+        ))}
         {busy && <p className="thinking">Triaging…</p>}
         <div ref={bottom} />
       </div>
+
+      {rollout && (
+        <RolloutPanel rollout={rollout} onDecide={(gateId, approved) => run(() => agent.stub.decideGate(gateId, approved))} />
+      )}
 
       <div className="samples">
         Try a sample:
@@ -105,13 +138,14 @@ function Chat({ service }: { service: string }) {
   );
 }
 
-function Message({ message }: { message: ChatMessage }) {
+function Message({ message, actions }: { message: ChatMessage; actions: ReactNode }) {
   if (message.role === "user") {
     return <pre className="msg user">{message.text}</pre>;
   }
   return (
     <div className="msg assistant">
       {message.verdict ? <VerdictCard verdict={message.verdict} /> : <p>{message.text}</p>}
+      {actions}
     </div>
   );
 }
@@ -119,6 +153,7 @@ function Message({ message }: { message: ChatMessage }) {
 const ACTION_LABEL: Record<Verdict["action"], string> = {
   retry: "Retry",
   rollback: "Roll back",
+  fix_forward: "Fix forward (keep the merge blocked)",
   staged_rollout: "Staged rollout (canary → 25% → 100%)",
 };
 

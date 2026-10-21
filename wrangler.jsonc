@@ -21,5 +21,11 @@
   "durable_objects": {
     "bindings": [{ "name": "ReleaseAgent", "class_name": "ReleaseAgent" }]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ReleaseAgent"] }]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ReleaseAgent"] }],
+
+  // Durable, resumable execution of retry / rollback / staged rollout,
+  // pausing at approval gates. Started and tracked by ReleaseAgent.
+  "workflows": [
+    { "name": "rollout-workflow", "binding": "ROLLOUT_WORKFLOW", "class_name": "RolloutWorkflow" }
+  ]
 }

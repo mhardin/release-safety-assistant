@@ -24,6 +24,7 @@ export default defineConfig({
               compatibilityDate: "2026-10-01",
               compatibilityFlags: ["nodejs_compat"],
               durableObjects: { ReleaseAgent: { className: "ReleaseAgent", useSQLite: true } },
+              workflows: { ROLLOUT_WORKFLOW: { name: "rollout-workflow", className: "RolloutWorkflow" } },
             },
           }),
         ],

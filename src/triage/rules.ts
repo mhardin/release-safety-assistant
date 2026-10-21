@@ -42,6 +42,11 @@ const FAILURE_WORDS = /\b(failed|failing|failure|exception|fatal|panic|crash(ed|
 const INSTRUCTION_PATTERN =
   /ignore (all |any |your |the )?(previous|prior|above|earlier) instructions|\b(note|message|instructions?) (to|for) (the )?(ai|assistant|llm|model|triage)\b|system (override|prompt)|\b(classify|mark|label|treat) (it|this)( failure| issue)? as\b|\bconfidence\s*[=:]\s*(1(\.0+)?|100%?)\b/i;
 
+// Evidence that the log comes from a deploy to a live environment rather than
+// pre-merge CI. Only a deploy can be rolled back.
+const DEPLOY_PATTERN =
+  /\bdeploy(ing|ed|ment)\b|\brollout\b|\breplicas?\b|kubectl|helm (upgrade|install)|CrashLoopBackOff|progress deadline|\bcanary\b|\bpod\/|\bto (prod|production|staging)\b/i;
+
 /** Scan input line by line; each rule fires at most once, on its first match. */
 export function extractSignals(input: string): RuleResult {
   const lines = input.split(/\r?\n/);
@@ -61,7 +66,9 @@ export function extractSignals(input: string): RuleResult {
   const kind = signals.length === 0 && !FAILURE_WORDS.test(input) ? "change_description" : "failure_log";
   const signature = signals.length > 0 ? `${signals[0].rule}:${normalizeLine(signals[0].line)}` : "none";
 
-  return { kind, signals, signature, suspicious };
+  const stage = DEPLOY_PATTERN.test(input) ? "deploy" : "ci";
+
+  return { kind, stage, signals, signature, suspicious };
 }
 
 /** Replace flagged lines before the input is sent to the model. */
