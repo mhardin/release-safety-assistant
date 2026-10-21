@@ -1,5 +1,5 @@
 import { Agent, callable } from "agents";
-import type { AgentState, ChatMessage, Verdict } from "../shared/types";
+import type { AgentState, ChatMessage, LlmVerdict, RuleResult, Verdict } from "../shared/types";
 import { combineVerdict } from "../triage/combine";
 import { classifyWithLlm } from "../triage/llm";
 import { extractSignals } from "../triage/rules";
@@ -32,6 +32,13 @@ export interface IncidentRow {
 export class ReleaseAgent extends Agent<Env, AgentState> {
   initialState: AgentState = { service: "", messages: [], busy: false };
 
+  /**
+   * The LLM step. Kept as a field so integration tests can swap in a fake
+   * instead of calling Workers AI (which needs a Cloudflare login and isn't deterministic).
+   */
+  classify: (input: string, rules: RuleResult) => Promise<LlmVerdict | null> = (input, rules) =>
+    classifyWithLlm(this.env.AI, input, rules);
+
   async onStart() {
     this.sql`CREATE TABLE IF NOT EXISTS incidents (
       id TEXT PRIMARY KEY,
@@ -56,7 +63,7 @@ export class ReleaseAgent extends Agent<Env, AgentState> {
     this.addMessage({ role: "user", text: text.slice(0, 20_000) }, true);
     try {
       const rules = extractSignals(text);
-      const llm = await classifyWithLlm(this.env.AI, text, rules);
+      const llm = await this.classify(text, rules);
       const verdict = combineVerdict(rules, llm);
 
       this.sql`INSERT INTO incidents (id, created_at, kind, cause, confidence, action, signature, summary)

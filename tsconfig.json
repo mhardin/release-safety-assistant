@@ -1,4 +1,8 @@
 {
   "extends": "agents/tsconfig",
+  "compilerOptions": {
+    // agents/tsconfig's types, plus `cloudflare:test` for the Workers integration tests.
+    "types": ["node", "@cloudflare/workers-types", "vite/client", "@cloudflare/vitest-plugin/types"]
+  },
   "include": ["src", "test", "worker-configuration.d.ts", "*.config.ts"]
 }

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { LlmVerdict } from "../src/shared/types";
-import { SAMPLES } from "../src/shared/samples";
-import { chooseAction, combineVerdict, scoreRules } from "../src/triage/combine";
-import { parseLlmVerdict, truncate } from "../src/triage/llm";
-import { extractSignals, normalizeLine } from "../src/triage/rules";
+import type { LlmVerdict } from "../../src/shared/types";
+import { SAMPLES } from "../../src/shared/samples";
+import { chooseAction, combineVerdict, scoreRules } from "../../src/triage/combine";
+import { parseLlmVerdict, truncate } from "../../src/triage/llm";
+import { extractSignals, normalizeLine } from "../../src/triage/rules";
 
 const llm = (over: Partial<LlmVerdict>): LlmVerdict => ({
   kind: "failure_log",
