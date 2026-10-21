@@ -27,7 +27,8 @@ export const GATE_TIMEOUT = "1 hour";
  * Each `step.do` result is persisted, so if the Workflow is interrupted it
  * resumes after the last completed step instead of re-applying changes. While
  * waiting at a gate it consumes no compute. Code outside steps (like
- * reportProgress) can run again on replay, so progress updates are idempotent.
+ * progress reports) can run again on replay; that's safe, though the UI may
+ * briefly show an older status.
  *
  * Deploys and metrics are simulated; `apply:*` is where a real deploy API call would go.
  */
@@ -42,9 +43,9 @@ export class RolloutWorkflow extends AgentWorkflow<ReleaseAgent, RolloutParams, 
   private async execute(action: ExecutableAction, failAt: string | undefined, step: AgentWorkflowStep): Promise<RolloutOutcome> {
     for (const s of buildPlan(action)) {
       if (s.kind === "gate") {
-        await this.reportProgress({ stepId: s.id, status: "waiting" });
+        await this.progress({ stepId: s.id, status: "waiting" });
         const decision = await this.waitForGate(step, s.id);
-        await this.reportProgress({ stepId: s.id, status: decision === "approved" ? "approved" : "rejected" });
+        await this.progress({ stepId: s.id, status: decision === "approved" ? "approved" : "rejected" });
         if (decision !== "approved") {
           await this.autoRollback(step);
           return {
@@ -56,9 +57,9 @@ export class RolloutWorkflow extends AgentWorkflow<ReleaseAgent, RolloutParams, 
         continue;
       }
 
-      await this.reportProgress({ stepId: s.id, status: "running" });
+      await this.progress({ stepId: s.id, status: "running" });
       const health = await this.runAndCheck(step, s, failAt);
-      await this.reportProgress({ stepId: s.id, status: health.healthy ? "passed" : "failed", health });
+      await this.progress({ stepId: s.id, status: health.healthy ? "passed" : "failed", health });
 
       if (!health.healthy) {
         // Health failures roll back without waiting for a human: safety actions shouldn't need approval.
@@ -91,9 +92,22 @@ export class RolloutWorkflow extends AgentWorkflow<ReleaseAgent, RolloutParams, 
   }
 
   private async autoRollback(step: AgentWorkflowStep) {
-    await this.reportProgress({ stepId: AUTO_ROLLBACK.id, status: "running" });
+    await this.progress({ stepId: AUTO_ROLLBACK.id, status: "running" });
     const health = await this.runAndCheck(step, AUTO_ROLLBACK);
-    await this.reportProgress({ stepId: AUTO_ROLLBACK.id, status: health.healthy ? "passed" : "failed", health });
+    await this.progress({ stepId: AUTO_ROLLBACK.id, status: health.healthy ? "passed" : "failed", health });
+  }
+
+  /**
+   * Progress only drives the UI. It's an RPC to the agent outside any step, so
+   * a failure here would otherwise fail the Workflow mid-rollout, skipping the
+   * automatic rollback. Log and carry on instead.
+   */
+  private async progress(p: RolloutProgress) {
+    try {
+      await this.reportProgress(p);
+    } catch (err) {
+      console.warn("Progress report failed", err);
+    }
   }
 
   private async waitForGate(step: AgentWorkflowStep, gateId: string): Promise<"approved" | "rejected" | "timed_out"> {
@@ -101,7 +115,8 @@ export class RolloutWorkflow extends AgentWorkflow<ReleaseAgent, RolloutParams, 
       const event = await step.waitForEvent<GateDecision>(`gate:${gateId}`, { type: gateEventType(gateId), timeout: GATE_TIMEOUT });
       return event.payload.approved ? "approved" : "rejected";
     } catch {
-      // waitForEvent throws when the timeout expires.
+      // waitForEvent throws when the timeout expires. Any failure while waiting
+      // is treated the same way: no decision, so the caller rolls back.
       return "timed_out";
     }
   }

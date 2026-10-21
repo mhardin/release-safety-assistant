@@ -37,8 +37,10 @@ Use option 3. The browser connects to `/agents/release-agent/<service>`;
 
 - Per-service isolation and history fall out of the addressing scheme; there
   is no tenant column to forget in a query.
-- A Durable Object handles requests one at a time, so concurrent triage for the
-  same service is naturally serialized. That is fine at this scale.
+- A Durable Object serializes storage operations, but not waiting on outgoing
+  calls: while one triage awaits Workers AI, another request for the same
+  service can run. The agent therefore allows one triage at a time (the
+  persisted `busy` flag) and one rollout at a time.
 - Cross-service questions ("which services hit registry timeouts today?") need
   fan-out across agents or a shared store such as D1 or Analytics Engine. Not
   needed for the MVP.

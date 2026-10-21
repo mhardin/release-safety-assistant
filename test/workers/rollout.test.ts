@@ -182,3 +182,78 @@ describe("guards", () => {
     );
   });
 });
+
+describe("callbacks and recovery", () => {
+  it("records a Workflow error and allows a new rollout afterwards", async () => {
+    await using _wf = await workflowsWithoutSleeps();
+    const { stub, incidentId } = await agentWithIncident(SAMPLES.changeDescription);
+    await stub.startAction(incidentId);
+    const r = await waitForRollout(stub, (r) => r.pendingGate === "promote-25");
+
+    await runInDurableObject(stub, (agent: ReleaseAgent) => agent.onWorkflowError("ROLLOUT_WORKFLOW", r.instanceId, "boom"));
+
+    const after = await rolloutOf(stub);
+    expect(after?.outcome).toMatchObject({ result: "failed", detail: expect.stringContaining("boom") });
+    expect((await stub.history())[0].outcome).toBe("failed");
+    expect(await stub.startAction(incidentId)).not.toBe(r.instanceId);
+  });
+
+  it("ignores callbacks for other rollouts and unknown steps", async () => {
+    await using _wf = await workflowsWithoutSleeps();
+    const { stub, incidentId } = await agentWithIncident(SAMPLES.changeDescription);
+    await stub.startAction(incidentId);
+    const before = await waitForRollout(stub, (r) => r.pendingGate === "promote-25");
+
+    const after = await runInDurableObject(stub, async (agent: ReleaseAgent) => {
+      await agent.onWorkflowProgress("ROLLOUT_WORKFLOW", "rollout-other", { stepId: "canary", status: "failed" });
+      await agent.onWorkflowComplete("ROLLOUT_WORKFLOW", "rollout-other", { result: "succeeded", detail: "x" });
+      await agent.onWorkflowProgress("ROLLOUT_WORKFLOW", before.instanceId, { stepId: "mystery", status: "running" });
+      return agent.state.rollout;
+    });
+    expect(after).toEqual(before);
+  });
+
+  it("reopens the gate if the decision can't be delivered", async () => {
+    await using _wf = await workflowsWithoutSleeps();
+    const { stub, incidentId } = await agentWithIncident(SAMPLES.changeDescription);
+    await stub.startAction(incidentId);
+    await waitForRollout(stub, (r) => r.pendingGate === "promote-25");
+
+    const pendingGate = await runInDurableObject(stub, async (agent: ReleaseAgent) => {
+      agent.sendWorkflowEvent = async () => {
+        throw new Error("network down");
+      };
+      await expect(agent.decideGate("promote-25", true)).rejects.toThrow("network down");
+      return agent.state.rollout?.pendingGate;
+    });
+    expect(pendingGate).toBe("promote-25"); // the user can try again instead of waiting for the timeout
+  });
+
+  // Looking up an instance that never existed makes the local Workflows engine
+  // log "Engine was never started" / "instance.not_found"; the agent catches it.
+  it("clears a rollout whose Workflow ended without reporting back", async () => {
+    const { stub, incidentId } = await agentWithIncident(SAMPLES.changeDescription);
+    await runInDurableObject(stub, (agent: ReleaseAgent) => {
+      // A rollout from two minutes ago whose final callback never arrived.
+      agent.setState({
+        ...agent.state,
+        rollout: {
+          instanceId: "rollout-lost",
+          incidentId,
+          action: "staged_rollout",
+          failAt: null,
+          steps: [],
+          pendingGate: null,
+          outcome: null,
+          startedAt: Date.now() - 120_000,
+        },
+      });
+    });
+
+    await using _wf = await workflowsWithoutSleeps();
+    const id = await stub.startAction(incidentId); // no "already in progress"
+    expect(id).not.toBe("rollout-lost");
+    const messages = await runInDurableObject(stub, (agent: ReleaseAgent) => agent.state.messages.map((m) => m.text));
+    expect(messages.some((t) => t.includes("without reporting back"))).toBe(true);
+  });
+});

@@ -51,8 +51,13 @@ function (`buildPlan`) shared by the Workflow, the Agent, and the UI.
 - Restart-safety comes from the platform and the Workflow code reads as
   straight-line steps.
 - Code outside `step.*` re-runs when a Workflow resumes, so progress reports
-  can repeat. They are idempotent status updates, so the UI can briefly show
-  an older status before catching up.
+  can repeat; the UI can briefly show an older status before catching up.
+  Progress is best-effort: a failed report is logged, not allowed to fail the
+  rollout midway and skip its automatic rollback.
+- Callbacks to the agent can be lost. Before refusing a new rollout because
+  one looks active, the agent asks the platform for the instance's real
+  status and records it if the Workflow has already ended. If delivering a
+  gate decision fails, the gate is reopened so it can be retried.
 - Deploys and metrics are simulated (`apply:*` and `simulateMetrics`). The
   `failAt` option lets demos and tests force a health failure at a chosen
   step. Real integration would replace those two functions with calls to a

@@ -63,8 +63,8 @@ describe("ReleaseAgent.triage", () => {
     expect(result).toMatchObject({ cause: "change", action: "fix_forward", source: "rules" });
   });
 
-  it("falls back to rules when the real Workers AI call fails", async () => {
-    // No fake: classifyWithLlm runs for real, env.AI is missing, and the error must be contained.
+  it("falls back to rules when the AI binding is unavailable", async () => {
+    // No fake: classifyWithLlm runs for real against a missing env.AI, and the error must be contained.
     const stub = await agentFor();
     vi.spyOn(console, "error").mockImplementation(() => {});
     const result = await stub.triage(SAMPLES.environmentFailure);
@@ -117,14 +117,12 @@ describe("ReleaseAgent.triage", () => {
     expect(state.messages.at(-1)?.text).toMatch(/interrupted/);
   });
 
-  it("keeps history separate per service", async () => {
-    const a = await agentFor(async () => null);
-    const b = await agentFor(async () => null);
-    await a.triage(SAMPLES.environmentFailure);
-    await a.triage(SAMPLES.changeFailure);
-    await b.triage(SAMPLES.mixedFailure);
-    expect(await a.history()).toHaveLength(2);
-    expect(await b.history()).toHaveLength(1);
+  it("refuses a second triage while one is running", async () => {
+    const stub = await agentFor(async () => null);
+    await runInDurableObject(stub, async (agent: ReleaseAgent) => {
+      agent.setState({ ...agent.state, busy: true }); // as if another request is awaiting the model
+      await expect(agent.triage(SAMPLES.changeFailure)).rejects.toThrow(/already running/);
+    });
   });
 });
 

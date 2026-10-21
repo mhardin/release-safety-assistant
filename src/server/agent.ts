@@ -79,8 +79,8 @@ export class ReleaseAgent extends Agent<Env, AgentState> {
     if (this.state.busy) {
       this.addMessage({ role: "assistant", text: "The previous triage was interrupted before it finished. Please submit it again." }, false);
     }
-    // No equivalent is needed for rollouts: the Workflow keeps running on its
-    // own and reports back when it finishes.
+    // Rollouts need no equivalent here: the Workflow keeps running on its own.
+    // If its final callback is lost, startAction reconciles with the platform.
   }
 
   // ---- Triage ---------------------------------------------------------------
@@ -90,6 +90,9 @@ export class ReleaseAgent extends Agent<Env, AgentState> {
   async triage(input: string): Promise<Verdict> {
     const text = input.trim();
     if (!text) throw new Error("Paste a log or describe a change.");
+    // A Durable Object only serializes storage work: while one triage awaits
+    // the model, another request can run. Allow one triage at a time.
+    if (this.state.busy) throw new Error("A triage is already running for this service; wait for it to finish.");
 
     // Chat state is broadcast in full on every change, so keep stored logs small.
     this.addMessage({ role: "user", text: clip(text, 1_000, 4_000) }, true);
@@ -113,9 +116,11 @@ export class ReleaseAgent extends Agent<Env, AgentState> {
     }
   }
 
+  /** Most recent incidents for this service, newest first. */
   @callable()
   async history(limit = 20): Promise<IncidentRow[]> {
-    return this.sql<IncidentRow>`SELECT * FROM incidents ORDER BY created_at DESC LIMIT ${limit}`;
+    const n = Math.min(Math.max(1, Math.floor(limit) || 1), 100);
+    return this.sql<IncidentRow>`SELECT * FROM incidents ORDER BY created_at DESC LIMIT ${n}`;
   }
 
   /** Earlier incidents of this service with the same failure signature. */
@@ -139,6 +144,7 @@ export class ReleaseAgent extends Agent<Env, AgentState> {
     if (!incident) throw new Error("Unknown incident.");
     const action = incident.action as Action;
     if (!isExecutable(action)) throw new Error("Fix forward happens on the branch; there is nothing to execute.");
+    if (this.state.rollout && !this.state.rollout.outcome) await this.reconcileRollout(this.state.rollout);
     if (this.state.rollout && !this.state.rollout.outcome) throw new Error("A rollout is already in progress for this service.");
 
     const plan = buildPlan(action);
@@ -180,7 +186,35 @@ export class ReleaseAgent extends Agent<Env, AgentState> {
     // Clear the pending gate before sending, so a double-click can't send twice.
     this.setState({ ...this.state, rollout: { ...rollout, pendingGate: null } });
     const decision: GateDecision = { approved };
-    await this.sendWorkflowEvent(WORKFLOW, rollout.instanceId, { type: gateEventType(gateId), payload: decision });
+    try {
+      await this.sendWorkflowEvent(WORKFLOW, rollout.instanceId, { type: gateEventType(gateId), payload: decision });
+    } catch (err) {
+      // The Workflow is still waiting: reopen the gate so the decision can be retried.
+      const current = this.currentRollout(rollout.instanceId);
+      if (current && !current.outcome) this.setState({ ...this.state, rollout: { ...current, pendingGate: gateId } });
+      throw err;
+    }
+  }
+
+  /**
+   * Workflow callbacks are best-effort. If the final one was lost, the rollout
+   * would look active forever, so ask the platform for the instance's real
+   * status. Skipped for young rollouts, whose instance may not exist yet.
+   */
+  private async reconcileRollout(rollout: RolloutState) {
+    if (Date.now() - rollout.startedAt < 60_000) return;
+    let status: string;
+    let output: unknown;
+    try {
+      ({ status, output } = await (await this.env.ROLLOUT_WORKFLOW.get(rollout.instanceId)).status());
+    } catch {
+      status = "not found";
+    }
+    if (status === "complete" && output) {
+      this.finishRollout(rollout.instanceId, output as RolloutOutcome);
+    } else if (["errored", "terminated", "complete", "not found"].includes(status)) {
+      this.finishRollout(rollout.instanceId, { result: "failed", detail: `The workflow ended (${status}) without reporting back.` });
+    }
   }
 
   // ---- Workflow callbacks ---------------------------------------------------
@@ -191,11 +225,12 @@ export class ReleaseAgent extends Agent<Env, AgentState> {
     const p = progress as RolloutProgress;
 
     const known = rollout.steps.some((s) => s.id === p.stepId);
+    if (!known && p.stepId !== AUTO_ROLLBACK.id) return;
     const steps = known
       ? rollout.steps.map((s) => (s.id === p.stepId ? { ...s, status: p.status, health: p.health ?? s.health } : s))
       : [...rollout.steps, { ...AUTO_ROLLBACK, status: p.status, health: p.health }];
 
-    // Only a gate that is waiting can be decided on; anything else clears it.
+    // A "waiting" report opens that gate; any later report about it closes it.
     const pendingGate = p.status === "waiting" ? p.stepId : rollout.pendingGate === p.stepId ? null : rollout.pendingGate;
     this.setState({ ...this.state, rollout: { ...rollout, steps, pendingGate } });
   }

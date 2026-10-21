@@ -14,8 +14,9 @@ export default {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/agents/")) {
       const name = AGENT_PATH.exec(url.pathname)?.[1];
+      if (!name) return new Response("Unknown agent path.", { status: 400 });
       // Checked as sent: a valid name never needs percent-encoding.
-      if (!name || !isValidServiceName(name)) {
+      if (!isValidServiceName(name)) {
         return new Response("Invalid service name: use lowercase letters, digits, and dashes.", { status: 400 });
       }
     }
